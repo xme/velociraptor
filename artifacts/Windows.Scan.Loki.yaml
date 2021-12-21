@@ -1,0 +1,81 @@
+name: Custom.Windows.Scan.Loki
+description: |
+    
+  This artifact deploys a Loki scanner and search for IOCs. Loki requires Internet connectivity to fetch the
+  latest IOCs and YARA rules.
+
+  The feature to upload results back to Velociraptor is based on the artifact developed by Eduardo Mattos - @eduardfir.
+    
+  NOTE: This artifact usually transfers a lot of data. You should increase the default timeout to allow it to complete.
+    
+author: Xavier Mertens @xme
+
+tools:
+  - name: loki_0.44.2
+    url: https://github.com/Neo23x0/Loki/releases/download/v0.44.2/loki_0.44.2.zip
+
+precondition: 
+  SELECT OS From info() where OS = 'windows'
+  
+parameters:
+  - name: Drive
+    default: C:\
+    description: Drive to scan (C:\)
+  - name: IntenseScan
+    type: bool
+    description: Perform intense scan
+  - name: OnlyRelevant
+    type: bool
+    description: Log only relevant information
+  - name: UploadResults
+    type: bool
+    description: Upload results back to Velociraptor
+  - name: Length
+    description: Size (in bytes) of output that will be returned for a single row.  This value may need to be adjusted depending on the size of your event logs.
+    type: int
+    default: "10000000"
+    
+sources:
+  - query: |
+        -- Scan the host
+        LET Toolzip <= SELECT FullPath FROM Artifact.Generic.Utils.FetchBinary(ToolName="loki_0.44.2", IsExecutable=FALSE)
+        LET Hostname <= SELECT Hostname as Host FROM info()
+        LET TmpDir <= tempdir(remove_last=TRUE)
+        LET LogFile <= tempfile(extension=".csv", remove_last=TRUE)
+        LET UnzipIt <= SELECT * FROM  unzip(filename=Toolzip.FullPath, output_directory=TmpDir)
+
+        -- LET ExecLoki <= SELECT * FROM execve(argv=filter(list=[ 
+        --         "cmd.exe", "/c", "cd", TmpDir + "\\loki", "&&", "loki-upgrader.exe", "--nolog", "&&", "loki.exe", "-p", Drive, "--csv", "--noindicator", "-l", "\"" + LogFile + "\""], length = Length)
+        -- SELECT * FROM parse_csv(filename=LogFile, auto_headers=FALSE)
+        
+        LET ExecLoki <= SELECT * FROM execve(argv=filter(list=[
+                        "cmd.exe", "/c",
+                        "cd", TmpDir + "\\loki", "&&",
+                        "loki-upgrader.exe", "--nolog", "&&", 
+                        "loki.exe", 
+                        "--noindicator",
+                        "-p", Drive,
+                        "-l", TmpDir + "\\loki\\" + Hostname.Host[0] + "-loki.csv", 
+                        "--csv", 
+                        "--dontwait",
+                        if(condition=OnlyRelevant, then="--onlyrelevant", else=""),
+                        if(condition=IntenseScan, then="--intense", else="")], 
+                        regex="."))
+
+        -- Postprocessing CSV results
+        SELECT * FROM foreach(row=ExecLoki,
+            query={
+                SELECT *, Hostname
+                FROM split_records(filenames=TmpDir + "\\loki\\" + Hostname.Host[0]  + "-loki.csv", accessor="auto", regex="," , columns=['Time', 'Hostname', 'DetectionType', 'ScanType', 'Detection'], count=5)
+        })
+        
+  - name: Uploads
+    query: |
+        -- Upload results back to Velociraptor if enabled
+        SELECT * FROM if (condition=UploadResults,
+            then={
+                SELECT Name, upload(file=FullPath,
+                                 name=relpath(base=TmpDir + Hostname.Host[0] + "-loki.csv", path=FullPath)) as FileDetails
+                FROM glob(globs="/**", root=TmpDir)
+                WHERE Name =~ "(csv)$"
+            })
