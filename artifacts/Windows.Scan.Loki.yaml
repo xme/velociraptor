@@ -11,8 +11,8 @@ description: |
 author: Xavier Mertens @xme
 
 tools:
-  - name: loki_0.44.2
-    url: https://github.com/Neo23x0/Loki/releases/download/v0.44.2/loki_0.44.2.zip
+  - name: loki_0.51.0
+    url: https://github.com/Neo23x0/Loki/releases/download/v0.51.0/loki_0.51.0.zip
 
 precondition: 
   SELECT OS From info() where OS = 'windows'
@@ -38,7 +38,7 @@ parameters:
 sources:
   - query: |
         -- Scan the host
-        LET Toolzip <= SELECT FullPath FROM Artifact.Generic.Utils.FetchBinary(ToolName="loki_0.44.2", IsExecutable=FALSE)
+        LET Toolzip <= SELECT FullPath FROM Artifact.Generic.Utils.FetchBinary(ToolName="loki_0.51.0", IsExecutable=FALSE)
         LET Hostname <= SELECT Hostname as Host FROM info()
         LET TmpDir <= tempdir(remove_last=TRUE)
         LET LogFile <= tempfile(extension=".csv", remove_last=TRUE)
